@@ -31,6 +31,16 @@
                            Text="{x:Bind LocalizedName}" />
             </DataTemplate>
 
+            <DataTemplate x:Key="FontAxisTemplate"
+                          x:DataType="x:String">
+                <TextBlock Text="{x:Bind local:Appearances.FontAxisName((x:String))}"/>
+            </DataTemplate>
+
+            <DataTemplate x:Key="FontFeatureTemplate"
+                          x:DataType="x:String">
+                <TextBlock Text="{x:Bind local:Appearances.FontFeatureName((x:String))}"/>
+            </DataTemplate>
+
             <DataTemplate x:Key="ColorChipTemplate"
                           x:DataType="local:ColorTableEntry">
                 <Border Width="8"
@@ -38,10 +48,6 @@
                         Background="{x:Bind mtu:Converters.ColorToBrush(Color)}"
                         CornerRadius="1" />
             </DataTemplate>
-            <CollectionViewSource x:Key="FontAxesCVS"
-                                  x:Name="FontAxesCVS" />
-            <CollectionViewSource x:Key="FontFeaturesCVS"
-                                  x:Name="FontFeaturesCVS" />
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -183,7 +189,6 @@
             </local:SettingContainer>
 
             <!--  Font Face  -->
-
             <local:SettingContainer x:Uid="Profile_FontFace"
                                     ClearSettingValue="{x:Bind Appearance.ClearFontFace}"
                                     HasSettingValue="{x:Bind Appearance.HasFontFace, Mode=OneWay}"
@@ -191,35 +196,31 @@
                                     Visibility="{x:Bind Appearance.IsDefault, Mode=OneWay}">
 
                 <StackPanel Margin="0,8,0,0">
-                    <!--
-                        Binding the ItemsSource to a separate variable that switches between the
-                        two font lists causes a crash within the ComboBox code.
-                        As a workaround, introduce two ComboBox controls and only display one at a time.
-                    -->
-                    <ComboBox x:Uid="Profile_FontFaceBox"
-                              ItemTemplate="{StaticResource FontFaceComboBoxItemTemplate}"
-                              ItemsSource="{x:Bind SourceProfile.MonospaceFontList, Mode=OneWay}"
-                              SelectedItem="{x:Bind CurrentFontFace, Mode=OneWay}"
-                              SelectionChanged="FontFace_SelectionChanged"
-                              Style="{StaticResource ComboBoxSettingStyle}"
-                              Visibility="{x:Bind mtu:Converters.InvertedBooleanToVisibility(ShowAllFonts), Mode=OneWay}" />
-                    <ComboBox x:Uid="Profile_FontFaceBox"
-                              ItemTemplate="{StaticResource FontFaceComboBoxItemTemplate}"
-                              ItemsSource="{x:Bind SourceProfile.CompleteFontList, Mode=OneWay}"
-                              SelectedItem="{x:Bind CurrentFontFace, Mode=OneWay}"
-                              SelectionChanged="FontFace_SelectionChanged"
-                              Style="{StaticResource ComboBoxSettingStyle}"
-                              Visibility="{x:Bind ShowAllFonts, Mode=OneWay}" />
+                    <AutoSuggestBox x:Name="_fontFaceBox"
+                                    x:Uid="Profile_FontFaceBox"
+                                    GotFocus="FontFaceBox_GotFocus"
+                                    ItemTemplate="{StaticResource FontFaceComboBoxItemTemplate}"
+                                    ItemsSource="{x:Bind FilteredFontList, Mode=OneWay}"
+                                    LostFocus="FontFaceBox_LostFocus"
+                                    SuggestionChosen="FontFaceBox_SuggestionChosen"
+                                    Text="{x:Bind Appearance.FontFace, Mode=OneWay}"
+                                    TextBoxStyle="{StaticResource TextBoxSettingStyle}"
+                                    TextChanged="FontFaceBox_TextChanged" />
                     <CheckBox x:Name="ShowAllFontsCheckbox"
                               x:Uid="Profile_FontFaceShowAllFonts"
-                              IsChecked="{x:Bind ShowAllFonts, Mode=TwoWay}"
-                              IsEnabled="{x:Bind UsingMonospaceFont, Mode=OneWay}" />
+                              IsChecked="{x:Bind ShowAllFonts, Mode=TwoWay}" />
                 </StackPanel>
             </local:SettingContainer>
+            <muxc:InfoBar x:Uid="Profile_FontFace_MissingFontWarning"
+                          IsClosable="False"
+                          IsOpen="{x:Bind mtu:Converters.StringNotEmpty(Appearance.MissingFontWarningMessage), Mode=OneWay}"
+                          Message="{x:Bind Appearance.MissingFontWarningMessage, Mode=OneWay}"
+                          Severity="Error" />
             <muxc:InfoBar x:Uid="Profile_FontFace_ProportionalFontWarning"
-                          IsOpen="{x:Bind ShowProportionalFontWarning, Mode=OneWay}"
+                          IsClosable="False"
+                          IsOpen="{x:Bind mtu:Converters.StringNotEmpty(Appearance.ProportionalFontWarningMessage), Mode=OneWay}"
+                          Message="{x:Bind Appearance.ProportionalFontWarningMessage, Mode=OneWay}"
                           Severity="Warning" />
-
 
             <!--  Font Size  -->
             <local:SettingContainer x:Uid="Profile_FontSize"
@@ -300,7 +301,7 @@
                                     Style="{StaticResource ExpanderSettingContainerStyle}">
                 <StackPanel Spacing="16">
                     <ListView IsItemClickEnabled="False"
-                              ItemsSource="{Binding Source={StaticResource FontAxesCVS}}"
+                              ItemsSource="{x:Bind Appearance.SelectedFontAxes, Mode=OneWay}"
                               SelectionMode="None">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
@@ -308,12 +309,8 @@
                                 <Setter Property="Margin" Value="0" />
                             </Style>
                         </ListView.ItemContainerStyle>
-                        <ListView.Resources>
-                            <CollectionViewSource x:Key="FontAxesNamesCVS"
-                                                  x:Name="FontAxesNamesCVS" />
-                        </ListView.Resources>
                         <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:AxisKeyValuePair">
+                            <DataTemplate>
                                 <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -321,18 +318,18 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <ComboBox Grid.Column="0"
-                                              IsSynchronizedWithCurrentItem="False"
-                                              ItemsSource="{Binding Source={StaticResource FontAxesNamesCVS}}"
-                                              SelectedIndex="{x:Bind AxisIndex, Mode=TwoWay}" />
+                                                IsSynchronizedWithCurrentItem="False"
+                                                ItemsSource="{x:Bind Appearance.RemainingFontAxes, Mode=OneWay}"
+                                                SelectedItem="{x:Bind (x:String), Mode=TwoWay}" />
                                     <muxc:NumberBox Grid.Column="1"
-                                                    Value="{x:Bind AxisValue, Mode=TwoWay}" />
+                                                    Value="{x:Bind FontAxes[(x:String)], Mode=TwoWay}" />
                                     <Button Grid.Column="2"
                                             HorizontalAlignment="Right"
                                             Click="DeleteAxisKeyValuePair_Click"
                                             Style="{StaticResource DeleteButtonStyle}"
-                                            Tag="{x:Bind AxisKey, Mode=OneWay}">
+                                            Tag="{x:Bind Key, Mode=OneWay}">
                                         <FontIcon FontSize="{StaticResource StandardIconSize}"
-                                                  Glyph="&#xE74D;" />
+                                                    Glyph="&#xE74D;" />
                                     </Button>
                                 </Grid>
                             </DataTemplate>
@@ -352,7 +349,7 @@
                     </Button>
                 </StackPanel>
             </local:SettingContainer>
-            <local:SettingContainer x:Name="FontFeaturesContainer"
+            <!--<local:SettingContainer x:Name="FontFeaturesContainer"
                                     x:Uid="Profile_FontFeatures"
                                     ClearSettingValue="{x:Bind Appearance.ClearFontFeatures}"
                                     HasSettingValue="{x:Bind Appearance.HasFontFeatures, Mode=OneWay}"
@@ -361,7 +358,7 @@
                                     Style="{StaticResource ExpanderSettingContainerStyle}">
                 <StackPanel Spacing="16">
                     <ListView IsItemClickEnabled="False"
-                              ItemsSource="{Binding Source={StaticResource FontFeaturesCVS}}"
+                              ItemsSource="{x:Bind Appearance.FontFeaturesVector, Mode=OneWay}"
                               SelectionMode="None">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
@@ -369,10 +366,6 @@
                                 <Setter Property="Margin" Value="0" />
                             </Style>
                         </ListView.ItemContainerStyle>
-                        <ListView.Resources>
-                            <CollectionViewSource x:Key="FontFeaturesNamesCVS"
-                                                  x:Name="FontFeaturesNamesCVS" />
-                        </ListView.Resources>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="local:FeatureKeyValuePair">
                                 <Grid ColumnSpacing="8">
@@ -383,15 +376,15 @@
                                     </Grid.ColumnDefinitions>
                                     <ComboBox Grid.Column="0"
                                               IsSynchronizedWithCurrentItem="False"
-                                              ItemsSource="{Binding Source={StaticResource FontFeaturesNamesCVS}}"
-                                              SelectedIndex="{x:Bind FeatureIndex, Mode=TwoWay}" />
+                                              ItemsSource="{x:Bind Available, Mode=OneWay}"
+                                              SelectedItem="{x:Bind Key, Mode=TwoWay}" />
                                     <muxc:NumberBox Grid.Column="1"
-                                                    Value="{x:Bind FeatureValue, Mode=TwoWay}" />
+                                                    Value="{x:Bind Value, Mode=TwoWay}" />
                                     <Button Grid.Column="2"
                                             HorizontalAlignment="Right"
                                             Click="DeleteFeatureKeyValuePair_Click"
                                             Style="{StaticResource DeleteButtonStyle}"
-                                            Tag="{x:Bind FeatureKey, Mode=OneWay}">
+                                            Tag="{x:Bind Key, Mode=OneWay}">
                                         <FontIcon FontSize="{StaticResource StandardIconSize}"
                                                   Glyph="&#xE74D;" />
                                     </Button>
@@ -412,7 +405,7 @@
                         </Button.Content>
                     </Button>
                 </StackPanel>
-            </local:SettingContainer>
+            </local:SettingContainer>-->
 
             <!--  Builtin Glyphs  -->
             <local:SettingContainer x:Uid="Profile_EnableBuiltinGlyphs"

@@ -30,18 +30,16 @@ namespace Microsoft.Terminal.Settings.Editor
     // So instead we make an IObservableVector of these AxisKeyValuePair objects
     runtimeclass AxisKeyValuePair : Windows.UI.Xaml.Data.INotifyPropertyChanged
     {
-        AxisKeyValuePair(String axisKey, Single axisValue, Windows.Foundation.Collections.IMap<String, Single> baseMap, Windows.Foundation.Collections.IMap<String, String> tagToNameMap);
-        String AxisKey;
-        Single AxisValue;
-        Int32 AxisIndex;
+        Windows.Foundation.Collections.IObservableVector<String> Available { get; };
+        Object Key;
+        Single Value;
     }
 
     runtimeclass FeatureKeyValuePair : Windows.UI.Xaml.Data.INotifyPropertyChanged
     {
-        FeatureKeyValuePair(String featureKey, UInt32 featureValue, Windows.Foundation.Collections.IMap<String, UInt32> baseMap, Windows.Foundation.Collections.IMap<String, String> tagToNameMap);
-        String FeatureKey;
-        UInt32 FeatureValue;
-        Int32 FeatureIndex;
+        Windows.Foundation.Collections.IObservableVector<String> Available { get; };
+        Object Key;
+        UInt32 Value;
     }
 
     runtimeclass AppearanceViewModel : Windows.UI.Xaml.Data.INotifyPropertyChanged
@@ -59,21 +57,28 @@ namespace Microsoft.Terminal.Settings.Editor
         ColorSchemeViewModel CurrentColorScheme;
         Windows.Foundation.Collections.IObservableVector<ColorSchemeViewModel> SchemesList;
 
+        String MissingFontWarningMessage { get; };
+        String ProportionalFontWarningMessage { get; };
+
+        OBSERVABLE_PROJECTED_APPEARANCE_SETTING(Windows.Foundation.Collections.IMap<String COMMA Single>, FontAxes);
+        Windows.Foundation.Collections.IObservableVector<String> SelectedFontAxes { get; };
+        Windows.Foundation.Collections.IObservableVector<String> RemainingFontAxes { get; };
+
+        OBSERVABLE_PROJECTED_APPEARANCE_SETTING(Windows.Foundation.Collections.IMap<String COMMA UInt32>, FontFeatures);
+        Windows.Foundation.Collections.IObservableVector<String> SelectedFontFeatures { get; };
+        Windows.Foundation.Collections.IObservableVector<String> RemainingFontFeatures { get; };
+
         void AddNewAxisKeyValuePair();
         void DeleteAxisKeyValuePair(String key);
-        void InitializeFontAxesVector();
         Boolean AreFontAxesAvailable { get; };
         Boolean CanFontAxesBeAdded { get; };
         Windows.Foundation.Collections.IObservableVector<AxisKeyValuePair> FontAxesVector;
-        OBSERVABLE_PROJECTED_APPEARANCE_SETTING(Windows.Foundation.Collections.IMap<String COMMA Single>, FontAxes);
 
         void AddNewFeatureKeyValuePair();
         void DeleteFeatureKeyValuePair(String key);
-        void InitializeFontFeaturesVector();
         Boolean AreFontFeaturesAvailable { get; };
         Boolean CanFontFeaturesBeAdded { get; };
         Windows.Foundation.Collections.IObservableVector<FeatureKeyValuePair> FontFeaturesVector;
-        OBSERVABLE_PROJECTED_APPEARANCE_SETTING(Windows.Foundation.Collections.IMap<String COMMA UInt32>, FontFeatures);
 
         OBSERVABLE_PROJECTED_APPEARANCE_SETTING(String, FontFace);
         OBSERVABLE_PROJECTED_APPEARANCE_SETTING(Single, FontSize);
@@ -96,15 +101,17 @@ namespace Microsoft.Terminal.Settings.Editor
 
     [default_interface] runtimeclass Appearances : Windows.UI.Xaml.Controls.UserControl, Windows.UI.Xaml.Data.INotifyPropertyChanged
     {
+        static String FontAxisName(String key);
+        static String FontFeatureName(String key);
+
         Appearances();
         AppearanceViewModel Appearance;
         ProfileViewModel SourceProfile;
         IHostedInWindow WindowRoot;
         static Windows.UI.Xaml.DependencyProperty AppearanceProperty { get; };
 
-        Boolean UsingMonospaceFont { get; };
+        Windows.Foundation.Collections.IObservableVector<Font> FilteredFontList { get; };
         Boolean ShowAllFonts;
-        Boolean ShowProportionalFontWarning;
 
         IInspectable CurrentCursorShape;
         Boolean IsVintageCursor { get; };
@@ -120,7 +127,6 @@ namespace Microsoft.Terminal.Settings.Editor
         Boolean IsCustomFontWeight { get; };
         Windows.Foundation.Collections.IObservableVector<Microsoft.Terminal.Settings.Editor.EnumEntry> FontWeightList { get; };
 
-        IInspectable CurrentFontFace { get; };
         Windows.UI.Xaml.Controls.Slider BIOpacitySlider { get; };
 
         IInspectable CurrentIntenseTextStyle;

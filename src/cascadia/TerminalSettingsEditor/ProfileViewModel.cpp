@@ -176,35 +176,6 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
     }
     CATCH_LOG();
 
-    Editor::Font ProfileViewModel::FindFontWithLocalizedName(const winrt::hstring& name) noexcept
-    {
-        // look for the current font in our shown list of fonts
-        Editor::Font fallbackFont{ nullptr };
-        try
-        {
-            if (!CompleteFontList())
-            {
-                UpdateFontList();
-            }
-            const auto& currentFontList{ CompleteFontList() };
-            for (const auto& font : currentFontList)
-            {
-                if (font.LocalizedName() == name)
-                {
-                    return font;
-                }
-                else if (font.LocalizedName() == L"Cascadia Mono")
-                {
-                    fallbackFont = font;
-                }
-            }
-        }
-        CATCH_LOG();
-
-        // we couldn't find the desired font, set to "Cascadia Mono" if we found that since it ships by default
-        return fallbackFont;
-    }
-
     static winrt::hstring getLocalizedStringByIndex(IDWriteLocalizedStrings* strings, UINT32 index)
     {
         UINT32 length = 0;
