@@ -106,3 +106,29 @@ stages:
       dependsOn: []
       jobs:
         - template: ./templates-v2/job-index-github-codenav.yml
+
+  - stage: Build_Test_x64_Clang
+    displayName: Build and Test x64 ClangCL
+    dependsOn: []
+    jobs:
+      - template: ./templates-v2/job-build-project.yml
+        parameters:
+          pool:
+            ${{ if eq(variables['System.CollectionUri'], 'https://dev.azure.com/ms/') }}:
+              name: SHINE-OSS-L
+            ${{ if ne(variables['System.CollectionUri'], 'https://dev.azure.com/ms/') }}:
+              name: SHINE-INT-L
+          buildPlatforms:
+            - x64
+          buildConfigurations: [Release]
+          buildEverything: true
+          keepAllExpensiveBuildOutputs: false
+          additionalBuildOptions: /p:WindowsTerminalClangBuild=true
+          artifactStem: -clang
+
+      - template: ./templates-v2/job-test-project.yml
+        parameters:
+          platform: x64
+          # The tests might be run more than once; log one artifact per attempt.
+          inputArtifactStem: -clang
+          outputArtifactStem: -clang-$(System.JobAttempt)
