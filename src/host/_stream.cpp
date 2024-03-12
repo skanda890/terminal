@@ -317,6 +317,18 @@ try
     else
     {
         screenInfo.GetStateMachine().ProcessString(str);
+
+        // Hotfix: Conhost traditionally snaps the viewport to the cursor position on output.
+        // You'll find identical code in AdjustCursorPosition which handles snapping for non-VT input.
+        const auto coordCursor = screenInfo.GetTextBuffer().GetCursor().GetPosition();
+        const auto cursorMovedPastViewport = coordCursor.y > screenInfo.GetViewport().BottomInclusive();
+        if (cursorMovedPastViewport)
+        {
+            til::point WindowOrigin;
+            WindowOrigin.x = 0;
+            WindowOrigin.y = coordCursor.y - screenInfo.GetViewport().BottomInclusive();
+            LOG_IF_FAILED(screenInfo.SetViewportOrigin(false, WindowOrigin, true));
+        }
     }
 
     return STATUS_SUCCESS;
