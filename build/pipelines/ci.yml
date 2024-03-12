@@ -107,8 +107,8 @@ stages:
       jobs:
         - template: ./templates-v2/job-index-github-codenav.yml
 
-  - stage: Build_Test_x64_Clang
-    displayName: Build and Test x64 ClangCL
+  - stage: Build_x64_Clang
+    displayName: Build x64 ClangCL
     dependsOn: []
     jobs:
       - template: ./templates-v2/job-build-project.yml
@@ -126,6 +126,12 @@ stages:
           additionalBuildOptions: /p:WindowsTerminalClangBuild=true
           artifactStem: -clang
 
+  - stage: Test_x64_Clang
+    displayName: Test x64 ClangCL
+    dependsOn:
+      - Build_x64_Clang
+    condition: succeeded()
+    jobs:
       - template: ./templates-v2/job-test-project.yml
         parameters:
           platform: x64
