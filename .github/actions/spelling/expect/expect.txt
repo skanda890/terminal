@@ -180,6 +180,7 @@ chaof
 charinfo
 CHARSETINFO
 chh
+chonker
 chshdng
 CHT
 Cic
@@ -561,6 +562,7 @@ ENUMLOGFONT
 ENUMLOGFONTEX
 enumranges
 EOK
+epres
 EPres
 EQU
 ERASEBKGND
@@ -584,6 +586,7 @@ EXPUNGECOMMANDHISTORY
 EXSTYLE
 EXTENDEDEDITKEY
 EXTKEY
+extpict
 EXTTEXTOUT
 facename
 FACENODE
@@ -598,6 +601,7 @@ FEEF
 fesb
 FFAF
 FFDE
+FFFD
 FFFDb
 fgbg
 FGCOLOR
@@ -657,6 +661,7 @@ fuzzwrapper
 fwdecl
 fwe
 fwlink
+gcb
 gci
 gcx
 gdi
@@ -843,6 +848,7 @@ ILD
 ime
 IMPEXP
 inbox
+incb
 inclusivity
 INCONTEXT
 INFOEX
@@ -1020,6 +1026,7 @@ luma
 lval
 LVB
 LVERTICAL
+LVT
 LWA
 LWIN
 lwkmvj
@@ -1049,6 +1056,7 @@ mdmerge
 MDs
 MEASUREITEM
 megamix
+Meh
 memallocator
 meme
 MENUCHAR
@@ -1517,7 +1525,7 @@ rgw
 RIGHTALIGN
 RIGHTBUTTON
 riid
-RIS
+ris
 roadmap
 robomac
 rosetta
@@ -1819,6 +1827,7 @@ TREX
 triaged
 triaging
 Tribool
+triegen
 TRIMZEROHEADINGS
 trx
 tsa
@@ -1883,6 +1892,7 @@ UPDATEDISPLAY
 UPDOWN
 UPKEY
 upss
+UPSS
 uregex
 URegular
 usebackq

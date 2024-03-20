@@ -6,12 +6,13 @@
 
 #include "pch.h"
 
-#include <wil/win32_helpers.h>
-
 #pragma warning(disable : 4100) // '...': unreferenced formal parameter
 
 // WS_OVERLAPPEDWINDOW without WS_THICKFRAME, which disables resize by the user.
 static constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
+static const wchar_t* g_fontFamily = L"Consolas";
+static bool g_visualize;
 
 static CONSOLE_SCREEN_BUFFER_INFOEX g_info{ .cbSize = sizeof(g_info) };
 static std::vector<CHAR_INFO> g_buffer;
@@ -25,6 +26,11 @@ static LONG g_dpi;
 static std::vector<wchar_t> g_text;
 static std::vector<INT> g_textAdvance;
 
+static void printUTF16(const wchar_t* str)
+{
+    WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, static_cast<DWORD>(wcslen(str)), nullptr, nullptr);
+}
+
 static bool equalCoord(const COORD& a, const COORD& b) noexcept
 {
     return memcmp(&a, &b, sizeof(COORD)) == 0;
@@ -32,14 +38,14 @@ static bool equalCoord(const COORD& a, const COORD& b) noexcept
 
 static void updateFont(HWND hwnd, LONG dpi)
 {
-    const LOGFONTW lf{
+    LOGFONTW lf{
         .lfHeight = -MulDiv(10, dpi, 72),
         .lfWeight = FW_REGULAR,
         .lfCharSet = DEFAULT_CHARSET,
         .lfQuality = PROOF_QUALITY,
         .lfPitchAndFamily = FIXED_PITCH | FF_MODERN,
-        .lfFaceName = L"Consolas",
     };
+    wcscpy_s(lf.lfFaceName, g_fontFamily);
     g_font = wil::unique_hfont{ CreateFontIndirectW(&lf) };
     g_dpi = dpi;
 
@@ -66,7 +72,7 @@ static void updateConsoleState(HWND hwnd)
 
     // Add some extra columns/rows just in case the window is being resized
     // in-between GetConsoleScreenBufferInfoEx and ReadConsoleOutputW.
-    const COORD bufferSize{ g_info.dwSize.X + 10, g_info.dwSize.Y + 10 };
+    const COORD bufferSize{ (SHORT)(g_info.dwSize.X + 10), (SHORT)(g_info.dwSize.Y + 10) };
     if (!equalCoord(g_bufferSize, bufferSize))
     {
         g_bufferSize = bufferSize;
@@ -80,7 +86,7 @@ static void updateConsoleState(HWND hwnd)
         return;
     }
 
-    const COORD cellCount{ readArea.Right + 1, readArea.Bottom + 1 };
+    const COORD cellCount{ (SHORT)(readArea.Right + 1), (SHORT)(readArea.Bottom + 1) };
     if (!equalCoord(g_cellCount, cellCount))
     {
         g_cellCount = cellCount;
@@ -137,6 +143,25 @@ static void paintConsole(HWND hwnd)
                 }
             }
 
+            if (g_visualize)
+            {
+                for (auto& ch : g_text)
+                {
+                    if (ch < 0x20)
+                    {
+                        ch += 0x2400;
+                    }
+                    else if (ch == 0x20)
+                    {
+                        ch = 0x2423; // replace space with ␣
+                    }
+                    else if (ch == 0x7f)
+                    {
+                        ch = 0x2421; // replace del with ␡
+                    }
+                }
+            }
+
             RECT r;
             r.left = g_cellSize.cx * x;
             r.top = g_cellSize.cy * y;
@@ -180,26 +205,55 @@ LRESULT WndProc(HWND hwnd, UINT message, size_t wParam, LPARAM lParam)
     }
 }
 
-static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nShowCmd)
+int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nShowCmd)
 {
-    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+    wil::unique_hwnd hwnd;
+
+    try
     {
-        MessageBoxW(nullptr, L"This application needs to be spawned from within a console session.", L"Failure", MB_ICONWARNING | MB_OK);
-        return;
-    }
+        if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        {
+            MessageBoxW(nullptr, L"This application needs to be spawned from within a console session.", L"Failure", MB_ICONWARNING | MB_OK);
+            return 1;
+        }
 
-    const WNDCLASSEXW wc{
-        .cbSize = sizeof(wc),
-        .style = CS_OWNDC,
-        .lpfnWndProc = WndProc,
-        .hInstance = hInstance,
-        .hCursor = LoadCursor(nullptr, IDC_ARROW),
-        .lpszClassName = L"ConsoleMonitor",
-    };
-    THROW_LAST_ERROR_IF(!RegisterClassExW(&wc));
+        int argc;
+        const auto argv = CommandLineToArgvW(lpCmdLine, &argc);
+        for (int i = 0; i < argc; i++)
+        {
+            if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0)
+            {
+                printUTF16(
+                    L"This application allows you to monitor the text buffer contents of ConPTY.\r\n"
+                    L"All you need to do is run this application in Windows Terminal and it will pop up a window.\r\n"
+                    L"\r\n"
+                    L"Options:\r\n"
+                    L"  -h, --help         Print help\r\n"
+                    L"  --font <family>    Font to use for the monitor window [default: Consolas]\r\n"
+                    L"  --visualize        Show invisible control characters\r\n");
+                return 0;
+            }
+            if (wcscmp(argv[i], L"--font") == 0 && ++i < argc)
+            {
+                g_fontFamily = argv[i];
+            }
+            if (wcscmp(argv[i], L"--visualize") == 0)
+            {
+                g_visualize = true;
+            }
+        }
 
-    const wil::unique_hwnd hwnd{
-        THROW_LAST_ERROR_IF_NULL(CreateWindowExW(
+        const WNDCLASSEXW wc{
+            .cbSize = sizeof(wc),
+            .style = CS_OWNDC,
+            .lpfnWndProc = WndProc,
+            .hInstance = hInstance,
+            .hCursor = LoadCursor(nullptr, IDC_ARROW),
+            .lpszClassName = L"ConsoleMonitor",
+        };
+        THROW_LAST_ERROR_IF(!RegisterClassExW(&wc));
+
+        hwnd.reset(THROW_LAST_ERROR_IF_NULL(CreateWindowExW(
             0,
             wc.lpszClassName,
             L"ConsoleMonitor",
@@ -211,30 +265,25 @@ static void winMainImpl(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstan
             nullptr,
             nullptr,
             wc.hInstance,
-            nullptr))
-    };
+            nullptr)));
 
-    updateFont(hwnd.get(), static_cast<LONG>(GetDpiForWindow(hwnd.get())));
-    updateConsoleState(hwnd.get());
+        updateFont(hwnd.get(), static_cast<LONG>(GetDpiForWindow(hwnd.get())));
+        updateConsoleState(hwnd.get());
 
-    ShowWindow(hwnd.get(), SW_SHOWNORMAL);
-    UpdateWindow(hwnd.get());
+        ShowWindow(hwnd.get(), SW_SHOWNORMAL);
+        UpdateWindow(hwnd.get());
 
-    SetTimer(hwnd.get(), 0, 30, nullptr);
+        SetTimer(hwnd.get(), 0, 30, nullptr);
 
-    MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0))
-    {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-}
+        // All good so far, now ignore Ctrl+C.
+        SetConsoleCtrlHandler(nullptr, TRUE);
 
-int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nShowCmd)
-{
-    try
-    {
-        winMainImpl(hInstance, hPrevInstance, lpCmdLine, nShowCmd);
+        MSG msg;
+        while (GetMessageW(&msg, nullptr, 0, 0))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
     catch (const wil::ResultException& e)
     {

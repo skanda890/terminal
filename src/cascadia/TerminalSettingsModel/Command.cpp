@@ -5,9 +5,11 @@
 #include "Command.h"
 #include "Command.g.cpp"
 
+#include <LibraryResources.h>
+#include <til/replace.h>
+
 #include "ActionAndArgs.h"
 #include "KeyChordSerialization.h"
-#include <LibraryResources.h>
 #include "TerminalSettingsSerializationHelpers.h"
 
 using namespace winrt::Microsoft::Terminal::Settings::Model;

@@ -412,7 +412,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TerminalStress", "src\tools
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RenderingTests", "src\tools\RenderingTests\RenderingTests.vcxproj", "{37C995E0-2349-4154-8E77-4A52C0C7F46D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "UIHelpers", "src\cascadia\UIHelpers\UIHelpers.vcxproj", "{6515F03F-E56D-4DB4-B23D-AC4FB80DB36F}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Microsoft.Terminal.UI", "src\cascadia\UIHelpers\UIHelpers.vcxproj", "{6515F03F-E56D-4DB4-B23D-AC4FB80DB36F}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "benchcat", "src\tools\benchcat\benchcat.vcxproj", "{2C836962-9543-4CE5-B834-D28E1F124B66}"
 EndProject
@@ -2404,6 +2404,7 @@ Global
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Debug|Any CPU.ActiveCfg = Debug|Win32
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Debug|ARM64.ActiveCfg = Debug|ARM64
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Debug|x64.ActiveCfg = Debug|x64
+		{328729E9-6723-416E-9C98-951F1473BBE1}.Debug|x64.Build.0 = Debug|x64
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Debug|x86.ActiveCfg = Debug|Win32
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Fuzzing|Any CPU.ActiveCfg = Fuzzing|Win32
 		{328729E9-6723-416E-9C98-951F1473BBE1}.Fuzzing|ARM64.ActiveCfg = Fuzzing|ARM64
