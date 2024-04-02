@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"slices"
 	"strconv"
@@ -25,22 +26,104 @@ const (
 type ClusterBreak int
 
 const (
-	cbOther                ClusterBreak = iota // GB999
-	cbControl                                  // GB3, GB4, GB5
-	cbHangulL                                  // GB6, GB7, GB8
-	cbHangulV                                  // GB6, GB7, GB8
-	cbHangulT                                  // GB6, GB7, GB8
-	cbHangulLV                                 // GB6, GB7, GB8
-	cbHangulLVT                                // GB6, GB7, GB8
-	cbExtend                                   // GB9, GB9a
-	cbZeroWidthJoiner                          // GB9, GB11
-	cbPrepend                                  // GB9b
-	cbConjunctLinker                           // GB9c
-	cbExtendedPictographic                     // GB11
-	cbRegionalIndicator                        // GB12, GB13
+	cbOther         ClusterBreak = iota // GB999
+	cbControl                           // GB3, GB4, GB5 -- includes CR, LF
+	cbExtend                            // GB9, GB9a -- includes SpacingMark
+	cbRI                                // GB12, GB13
+	cbPrepend                           // GB9b
+	cbHangulL                           // GB6, GB7, GB8
+	cbHangulV                           // GB6, GB7, GB8
+	cbHangulT                           // GB6, GB7, GB8
+	cbHangulLV                          // GB6, GB7, GB8
+	cbHangulLVT                         // GB6, GB7, GB8
+	cbInCBLinker                        // GB9c
+	cbInCBConsonant                     // GB9c
+	cbExtPic                            // GB11
+	cbZWJ                               // GB9, GB11
 
 	cbCount
 )
+
+// Ω is what UAX #29 writes as "÷". ÷ is not a valid identifier in Go.
+var Ω uint8 = 0b11
+
+// JoinRules doesn't quite follow UAX #29, as it states:
+// > Note: Testing two adjacent characters is insufficient for determining a boundary.
+//
+// I completely agree, however it makes the implementation complex and slow and it only benefits what can be considered
+// edge cases in the context of terminals. By using a lookup table anyway this results in a >100MB/s throughput,
+// before adding any fast-passes whatsoever. This is at least 2x as fast as any standards conforming implementation.
+//
+// This affects the following rules:
+// * GB9c: \p{InCB=Consonant} [\p{InCB=Extend}\p{InCB=Linker}]* \p{InCB=Linker} [\p{InCB=Extend}\p{InCB=Linker}]* × \p{InCB=Consonant}
+//   "Do not break within certain combinations with Indic_Conjunct_Break (InCB)=Linker."
+//   Our implementation does this:
+//                     × \p{InCB=Linker}
+//     \p{InCB=Linker} × \p{InCB=Consonant}
+//   In other words, it doesn't check for a leading \p{InCB=Consonant} or a series of Extenders/Linkers in between.
+//   I suspect that these simplified rules are sufficient for the vast majority of terminal use cases.
+// * GB11: \p{Extended_Pictographic} Extend* ZWJ × \p{Extended_Pictographic}
+//   "Do not break within emoji modifier sequences or emoji zwj sequences."
+//   Our implementation does this:
+//     ZWJ × \p{Extended_Pictographic}
+//   In other words, it doesn't check whether the ZWJ is led by another \p{InCB=Extended_Pictographic}.
+//   Again, I suspect that a trailing, standalone ZWJ is a rare occurence and joining it with any Emoji is fine.
+// * GB12: sot (RI RI)* RI × RI
+//   GB13: [^RI] (RI RI)* RI × RI
+//   "Do not break within emoji flag sequences. That is, do not break between regional indicator
+//   (RI) symbols if there is an odd number of RI characters before the break point."
+//   Our implementation does this (this is not a real notation):
+//     RI ÷ RI × RI ÷ RI
+//   In other words, it joins any pair of RIs and then immediately aborts further RI joins.
+//   Unlike the above two cases, this is a bit more risky, because it's much more likely to be encountered in practice.
+//   Imagine a shell that doesn't understand graphemes for instance. You type 2 flags (= 4 RIs) and backspace.
+//   You'll now have 3 RIs. If iterating through it forwards, you'd join the first two, then get 1 lone RI at the end,
+//   whereas if you iterate backwards you'd join the last two, then get 1 lone RI at the start.
+//   This assymmetry may have some subtle effects, but I suspect that it's still rare enough to not matter much.
+//
+// This is a great reference for the resulting table:
+// https://www.unicode.org/Public/UCD/latest/ucd/auxiliary/GraphemeBreakTest.html
+var JoinRules = [][][]uint8{
+	// Base table
+	{
+		/* | leading       -> trailing codepoint                                                                                                                                                            */
+		/* v               |  cbOther | cbControl | cbExtend |   cbRI   | cbPrepend | cbHangulL | cbHangulV | cbHangulT | cbHangulLV | cbHangulLVT | cbInCBLinker | cbInCBConsonant | cbExtPic |   cbZWJ  | */
+		/* cbOther         | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbControl       | */ {Ω /* | */, Ω /*  | */, Ω /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, Ω /*   |    */, Ω /*     | */, Ω /* | */, Ω /* | */},
+		/* cbExtend        | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbRI            | */ {Ω /* | */, Ω /*  | */, 0 /* | */, 1 /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbPrepend       | */ {0 /* | */, Ω /*  | */, 0 /* | */, 0 /* | */, 0 /*  | */, 0 /*  | */, 0 /*  | */, 0 /*  |  */, 0 /*  |  */, 0 /*   |   */, 0 /*   |    */, 0 /*     | */, 0 /* | */, 0 /* | */},
+		/* cbHangulL       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, 0 /*  | */, 0 /*  | */, Ω /*  |  */, 0 /*  |  */, 0 /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulV       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, 0 /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulT       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulLV      | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, 0 /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulLVT     | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbInCBLinker    | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, 0 /*     | */, Ω /* | */, 0 /* | */},
+		/* cbInCBConsonant | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbExtPic        | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbZWJ           | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, 0 /* | */, 0 /* | */},
+	},
+	// Once we have encountered a Regional Indicator pair we'll enter this table.
+	// It's a copy of the base table, but further Regional Indicator joins are forbidden.
+	{
+		/* | leading       -> trailing codepoint                                                                                                                                                            */
+		/* v               |  cbOther | cbControl | cbExtend |   cbRI   | cbPrepend | cbHangulL | cbHangulV | cbHangulT | cbHangulLV | cbHangulLVT | cbInCBLinker | cbInCBConsonant | cbExtPic |   cbZWJ  | */
+		/* cbOther         | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbControl       | */ {Ω /* | */, Ω /*  | */, Ω /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, Ω /*   |    */, Ω /*     | */, Ω /* | */, Ω /* | */},
+		/* cbExtend        | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbRI            | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbPrepend       | */ {0 /* | */, Ω /*  | */, 0 /* | */, 0 /* | */, 0 /*  | */, 0 /*  | */, 0 /*  | */, 0 /*  |  */, 0 /*  |  */, 0 /*   |   */, 0 /*   |    */, 0 /*     | */, 0 /* | */, 0 /* | */},
+		/* cbHangulL       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, 0 /*  | */, 0 /*  | */, Ω /*  |  */, 0 /*  |  */, 0 /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulV       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, 0 /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulT       | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulLV      | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, 0 /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbHangulLVT     | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, 0 /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbInCBLinker    | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, 0 /*     | */, Ω /* | */, 0 /* | */},
+		/* cbInCBConsonant | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbExtPic        | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, Ω /* | */, 0 /* | */},
+		/* cbZWJ           | */ {Ω /* | */, Ω /*  | */, 0 /* | */, Ω /* | */, Ω /*  | */, Ω /*  | */, Ω /*  | */, Ω /*  |  */, Ω /*  |  */, Ω /*   |   */, 0 /*   |    */, Ω /*     | */, 0 /* | */, 0 /* | */},
+	},
+}
 
 type HexInt int
 
@@ -116,8 +199,8 @@ You can download the latest ucd.nounihan.grouped.xml from:
 	// More stages = Less size. The trajectory roughly follows a+b*c^stages, where c < 1.
 	// 4 still gives ~30% savings over 3 stages and going beyond 5 gives diminishing returns (<10%).
 	trie := buildBestTrie(values, 2, 8, 4)
-	rules := buildJoinRules()
-	totalSize := trie.TotalSize + int(unsafe.Sizeof(rules))
+	rules := prepareRulesTable(JoinRules)
+	totalSize := trie.TotalSize + rulesSize(rules)
 
 	for cp, expected := range values {
 		var v TrieType
@@ -130,56 +213,68 @@ You can download the latest ucd.nounihan.grouped.xml from:
 	}
 
 	buf := &strings.Builder{}
+	add := func(format string, a ...any) {
+		_, _ = fmt.Fprintf(buf, format, a...)
+	}
 
-	_, _ = fmt.Fprintf(buf, "// Generated by CodepointWidthDetector_gen.go\n")
-	_, _ = fmt.Fprintf(buf, "// on %s, from %s, %d bytes\n", time.Now().UTC().Format(time.RFC3339), ucd.Description, totalSize)
-	_, _ = fmt.Fprintf(buf, "// clang-format off\n")
+	add("// Generated by CodepointWidthDetector_gen.go\n")
+	add("// on %s, from %s, %d bytes\n", time.Now().UTC().Format(time.RFC3339), ucd.Description, totalSize)
+	add("// clang-format off\n")
 
 	for i, s := range trie.Stages {
 		width := 16
 		if i != 0 {
 			width = s.Mask + 1
 		}
-		_, _ = fmt.Fprintf(buf, "static constexpr uint%d_t s_stage%d[] = {", s.Bits, i+1)
+		add("static constexpr uint%d_t s_stage%d[] = {", s.Bits, i+1)
 		for j, value := range s.Values {
 			if j%width == 0 {
-				buf.WriteString("\n   ")
+				add("\n   ")
 			}
-			_, _ = fmt.Fprintf(buf, " %#0*x,", s.Bits/4, value)
+			add(" %#0*x,", s.Bits/4, value)
 		}
-		buf.WriteString("\n};\n")
+		add("\n};\n")
 	}
 
-	buf.WriteString("static constexpr uint16_t s_joinRules[] = {\n")
-	for _, r := range rules {
-		_, _ = fmt.Fprintf(buf, "    %#016b,\n", r)
+	add("static constexpr uint32_t s_joinRules[%d][%d] = {\n", len(rules), len(rules[0]))
+	for _, table := range rules {
+		add("    {\n")
+		for _, r := range table {
+			add("        %#032b,\n", r)
+		}
+		add("    },\n")
 	}
-	buf.WriteString("};\n")
+	add("};\n")
 
-	_, _ = fmt.Fprintf(buf, "constexpr uint%d_t ucdLookup(const char32_t cp) noexcept\n", trie.Stages[len(trie.Stages)-1].Bits)
-	buf.WriteString("{\n")
+	add("constexpr uint%d_t ucdLookup(const char32_t cp) noexcept\n", trie.Stages[len(trie.Stages)-1].Bits)
+	add("{\n")
 	for i, s := range trie.Stages {
-		_, _ = fmt.Fprintf(buf, "    const auto s%d = s_stage%d[", i+1, i+1)
+		add("    const auto s%d = s_stage%d[", i+1, i+1)
 		if i == 0 {
-			_, _ = fmt.Fprintf(buf, "cp >> %d", s.Shift)
+			add("cp >> %d", s.Shift)
 		} else {
-			_, _ = fmt.Fprintf(buf, "s%d + ((cp >> %d) & %d)", i, s.Shift, s.Mask)
+			add("s%d + ((cp >> %d) & %d)", i, s.Shift, s.Mask)
 		}
-		buf.WriteString("];\n")
+		add("];\n")
 	}
-	_, _ = fmt.Fprintf(buf, "    return s%d;\n", len(trie.Stages))
-	buf.WriteString("}\n")
+	add("    return s%d;\n", len(trie.Stages))
+	add("}\n")
 
-	buf.WriteString(`constexpr bool ucdGraphemeJoins(const uint8_t lead, const uint8_t trail) noexcept
-{
-    return s_joinRules[lead & 15] & (1 << (trail & 15));
-}
-constexpr int ucdToCharacterWidth(const uint8_t val) noexcept
-{
-    return val >> 6;
-}
-// clang-format on
-`)
+	add("constexpr uint8_t ucdGraphemeJoins(const uint8_t state, const uint8_t lead, const uint8_t trail) noexcept\n")
+	add("{\n")
+	add("    const auto l = lead & 15;\n")
+	add("    const auto t = trail & 15;\n")
+	add("    return (s_joinRules[state][l] >> (t * %d)) & %d;\n", bits.Len8(Ω), Ω)
+	add("}\n")
+	add("constexpr bool ucdGraphemeDone(const uint8_t state) noexcept\n")
+	add("{\n")
+	add("    return state == %d;\n", Ω)
+	add("}\n")
+	add("constexpr int ucdToCharacterWidth(const uint8_t val) noexcept\n")
+	add("{\n")
+	add("    return val >> 6;\n")
+	add("}\n")
+	add("// clang-format on\n")
 
 	_, _ = os.Stdout.WriteString(buf.String())
 	return nil
@@ -218,9 +313,9 @@ func extractValuesFromUCD(ucd *UCD) ([]TrieType, error) {
 			case "PP": // Prepend
 				cb = cbPrepend
 			case "ZWJ": // Zero Width Joiner
-				cb = cbZeroWidthJoiner
+				cb = cbZWJ
 			case "RI": // Regional Indicator
-				cb = cbRegionalIndicator
+				cb = cbRI
 			case "L": // Hangul Syllable Type L
 				cb = cbHangulL
 			case "V": // Hangul Syllable Type V
@@ -241,14 +336,25 @@ func extractValuesFromUCD(ucd *UCD) ([]TrieType, error) {
 				if cb != cbOther {
 					return nil, fmt.Errorf("unexpected GCB %s with ExtPict=Y for %U to %U", graphemeClusterBreak, firstCp, lastCp)
 				}
-				cb = cbExtendedPictographic
+				cb = cbExtPic
 			}
-			if indicConjunctBreak == "Linker" {
+			switch indicConjunctBreak {
+			case "None", "Extend":
+				break
+			case "Linker":
 				// Similarly here, we can treat it as an alias for EXTEND, but with the GB9c properties.
 				if cb != cbExtend {
 					return nil, fmt.Errorf("unexpected GCB %s with InCB=Linker for %U to %U", graphemeClusterBreak, firstCp, lastCp)
 				}
-				cb = cbConjunctLinker
+				cb = cbInCBLinker
+			case "Consonant":
+				// Similarly here, we can treat it as an alias for OTHER, but with the GB9c properties.
+				if cb != cbOther {
+					return nil, fmt.Errorf("unexpected GCB %s with InCB=Consonant for %U to %U", graphemeClusterBreak, firstCp, lastCp)
+				}
+				cb = cbInCBConsonant
+			default:
+				return nil, fmt.Errorf("unrecognized InCB %s for %U to %U", indicConjunctBreak, firstCp, lastCp)
 			}
 
 			var width CharacterWidth
@@ -442,7 +548,7 @@ func findExisting(haystack, needle []TrieType) int {
 	}
 }
 
-// Given two slices, this returns the amount by which prev's end overlaps with next's start.
+// Given two slices, this returns the amount by which `prev`s end overlaps with `next`s start.
 // That is, given [0,1,2,3,4] and [2,3,4,5] this returns 3 because [2,3,4] is the "overlap".
 func measureOverlap(prev, next []TrieType) int {
 	for overlap := min(len(prev), len(next)); overlap >= 0; overlap-- {
@@ -453,101 +559,36 @@ func measureOverlap(prev, next []TrieType) int {
 	return 0
 }
 
-func buildJoinRules() [16]uint16 {
-	// UAX #29 states:
-	// > Note: Testing two adjacent characters is insufficient for determining a boundary.
-	//
-	// I completely agree, but I really hate it. So this code trades off correctness for simplicity
-	// by using a simple lookup table anyway. Under most circumstances users won't notice,
-	// because as far as I can see this only behaves different for degenerate ("invalid") Unicode.
-	// It reduces our code complexity significantly and is way *way* faster.
-	//
-	// This is a great reference for the resulting table:
-	//   https://www.unicode.org/Public/UCD/latest/ucd/auxiliary/GraphemeBreakTest.html
-
-	// NOTE: We build the table in reverse, because rules with lower numbers take priority.
-	// (This is primarily relevant for GB9b vs. GB4.)
-
-	// Otherwise, break everywhere.
-	// GB999: Any ÷ Any
-	var rules [16]uint16
-
-	// Do not break within emoji flag sequences. That is, do not break between regional indicator
-	// (RI) symbols if there is an odd number of RI characters before the break point.
-	// GB13: [^RI] (RI RI)* RI × RI
-	// GB12: sot (RI RI)* RI × RI
-	//
-	// We cheat here by not checking that the number of RIs is even. Meh!
-	rules[cbRegionalIndicator] |= 1 << cbRegionalIndicator
-
-	// Do not break within emoji modifier sequences or emoji zwj sequences.
-	// GB11: \p{Extended_Pictographic} Extend* ZWJ × \p{Extended_Pictographic}
-	//
-	// We cheat here by not checking that the ZWJ is preceded by an ExtPic. Meh!
-	rules[cbZeroWidthJoiner] |= 1 << cbExtendedPictographic
-
-	// Do not break within certain combinations with Indic_Conjunct_Break (InCB)=Linker.
-	// GB9c: \p{InCB=Consonant} [\p{InCB=Extend}\p{InCB=Linker}]* \p{InCB=Linker} [\p{InCB=Extend}\p{InCB=Linker}]* × \p{InCB=Consonant}
-	//
-	// I'm sure GB9c is great for these languages, but honestly the definition is complete whack.
-	// Just look at that chonker! This isn't a "cheat" like the others above, this is a reinvention:
-	// We treat it as having both ClusterBreak.PREPEND and ClusterBreak.EXTEND properties.
-	rules[cbConjunctLinker] = math.MaxUint16
-	for i := range rules {
-		rules[i] |= 1 << cbConjunctLinker
+func prepareRulesTable(rules [][][]uint8) [][]uint32 {
+	compressed := make([][]uint32, len(rules))
+	for i := range compressed {
+		compressed[i] = make([]uint32, 16)
 	}
 
-	// Do not break before SpacingMarks, or after Prepend characters.
-	// GB9b: Prepend ×
-	rules[cbPrepend] = math.MaxUint16
+	for prevIndex, table := range rules {
+		for lead, row := range table {
+			if len(row) > 16 {
+				panic("can't pack row into 32 bits")
+			}
 
-	// Do not break before SpacingMarks, or after Prepend characters.
-	// GB9a: × SpacingMark
-	// Do not break before extending characters or ZWJ.
-	// GB9: × (Extend | ZWJ)
-	for i := range rules {
-		// CodepointWidthDetector_gen.py sets SpacingMarks to ClusterBreak.EXTEND as well,
-		// since they're entirely identical to GB9's Extend.
-		rules[i] |= (1 << cbExtend) | (1 << cbZeroWidthJoiner)
+			var nextIndices uint32
+			for trail, nextIndex := range row {
+				if nextIndex > Ω {
+					panic("can't pack table index into 2 bits")
+				}
+				nextIndices |= uint32(nextIndex) << (trail * 2)
+			}
+
+			compressed[prevIndex][lead] = nextIndices
+		}
 	}
 
-	// Do not break Hangul syllable sequences.
-	// GB8: (LVT | T) x T
-	rules[cbHangulLVT] |= 1 << cbHangulT
-	rules[cbHangulT] |= 1 << cbHangulT
-	// GB7: (LV | V) x (V | T)
-	rules[cbHangulLV] |= 1 << cbHangulT
-	rules[cbHangulLV] |= 1 << cbHangulV
-	rules[cbHangulV] |= 1 << cbHangulV
-	rules[cbHangulV] |= 1 << cbHangulT
-	// GB6: L x (L | V | LV | LVT)
-	rules[cbHangulL] |= 1 << cbHangulL
-	rules[cbHangulL] |= 1 << cbHangulV
-	rules[cbHangulL] |= 1 << cbHangulLV
-	rules[cbHangulL] |= 1 << cbHangulLVT
+	return compressed
+}
 
-	// Do not break between a CR and LF. Otherwise, break before and after controls.
-	// GB5: ÷ (Control | CR | LF)
-	for i := range rules {
-		rules[i] &= ^(uint16(1) << cbControl)
-	}
-	// GB4: (Control | CR | LF) ÷
-	rules[cbControl] = 0
-
-	// We ignore GB3 which demands that CR × LF do not break apart, because
-	// a) these control characters won't normally reach our text storage
-	// b) otherwise we're in a raw write mode and historically conhost stores them in separate cells
-
-	// We also ignore GB1 and GB2 which demand breaks at the start and end,
-	// because that's not part of the loops in GraphemeNext/Prev and not this table.
-
-	// Set any bits to 0 which are outside the valid [cbOther,cbCount) range.
-	for i := range rules {
-		rules[i] &= 1<<cbCount - 1
-	}
-	fillRange(rules[cbCount:], 0)
-
-	return rules
+func rulesSize(rules [][]uint32) int {
+	// Each rules item has the same length. Each item is 32 bits = 4 bytes.
+	return len(rules) * len(rules[0]) * 4
 }
 
 func fillRange[T any](s []T, v T) {

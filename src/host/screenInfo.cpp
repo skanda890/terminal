@@ -2468,7 +2468,6 @@ Viewport SCREEN_INFORMATION::GetVirtualViewport() const noexcept
 
 // Method Description:
 // - Returns true if the character at the cursor's current position is wide.
-//   See IsGlyphFullWidth
 // Arguments:
 // - <none>
 // Return Value:

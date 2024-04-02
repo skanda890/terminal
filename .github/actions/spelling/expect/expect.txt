@@ -182,7 +182,6 @@ chaof
 charinfo
 CHARSETINFO
 chh
-chonker
 chshdng
 CHT
 Cic
@@ -1061,7 +1060,6 @@ mdmerge
 MDs
 MEASUREITEM
 megamix
-Meh
 memallocator
 meme
 MENUCHAR
