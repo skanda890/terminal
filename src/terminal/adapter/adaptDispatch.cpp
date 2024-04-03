@@ -3592,36 +3592,42 @@ bool AdaptDispatch::DoConEmuAction(const std::wstring_view string)
     constexpr size_t TaskbarMaxState{ 4 };
     constexpr size_t TaskbarMaxProgress{ 100 };
 
-    unsigned int state = 0;
-    unsigned int progress = 0;
-
     const auto parts = Utils::SplitString(string, L';');
-    unsigned int subParam = 0;
+    if (parts.size() < 1)
+    {
+        return false;
+    }
 
-    if (parts.size() < 1 || !Utils::StringToUint(til::at(parts, 0), subParam))
+    const auto subParam = til::parse_unsigned<unsigned int>(til::at(parts, 0));
+    if (!subParam)
     {
         return false;
     }
 
     // 4 is SetProgressBar, which sets the taskbar state/progress.
-    if (subParam == 4)
+    if (*subParam == 4)
     {
+        unsigned int state = 0;
         if (parts.size() >= 2)
         {
             // A state parameter is defined, parse it out
-            const auto stateSuccess = Utils::StringToUint(til::at(parts, 1), state);
-            if (!stateSuccess && !til::at(parts, 1).empty())
+            const auto stateOpt = til::parse_unsigned<unsigned int>(til::at(parts, 1));
+            state = stateOpt.value_or(0);
+            if (!stateOpt && !til::at(parts, 1).empty())
             {
                 return false;
             }
-            if (parts.size() >= 3)
+        }
+
+        unsigned int progress = 0;
+        if (parts.size() >= 3)
+        {
+            // A progress parameter is also defined, parse it out
+            const auto progressOpt = til::parse_unsigned<unsigned int>(til::at(parts, 2));
+            progress = progressOpt.value_or(0);
+            if (!progressOpt && !til::at(parts, 2).empty())
             {
-                // A progress parameter is also defined, parse it out
-                const auto progressSuccess = Utils::StringToUint(til::at(parts, 2), progress);
-                if (!progressSuccess && !til::at(parts, 2).empty())
-                {
-                    return false;
-                }
+                return false;
             }
         }
 
@@ -3639,7 +3645,7 @@ bool AdaptDispatch::DoConEmuAction(const std::wstring_view string)
         return true;
     }
     // 9 is SetWorkingDirectory, which informs the terminal about the current working directory.
-    else if (subParam == 9)
+    else if (*subParam == 9)
     {
         if (parts.size() >= 2)
         {
@@ -3669,7 +3675,7 @@ bool AdaptDispatch::DoConEmuAction(const std::wstring_view string)
     // * https://conemu.github.io/en/ShellWorkDir.html#PowerShell
     //
     // This seems like basically the same as 133;B - the end of the prompt, the start of the commandline.
-    else if (subParam == 12)
+    else if (*subParam == 12)
     {
         _api.MarkCommandStart();
         return true;
@@ -3789,9 +3795,7 @@ bool AdaptDispatch::DoFinalTermAction(const std::wstring_view string)
                 // error and move on.
                 //
                 // We know that "0" will be successfully parsed, and that's close enough.
-                unsigned int parsedError = 0;
-                error = Utils::StringToUint(errorString, parsedError) ? parsedError :
-                                                                        UINT_MAX;
+                error = til::parse_unsigned<unsigned int>(errorString).value_or(UINT_MAX);
             }
             _api.MarkCommandFinish(error);
             return true;
@@ -3853,16 +3857,26 @@ bool AdaptDispatch::DoVsCodeAction(const std::wstring_view string)
         // 2:     $($completions.ReplacementLength);
         // 3:     $($cursorIndex);
         // 4:     $completions.CompletionMatches | ConvertTo-Json
-        unsigned int replacementIndex = 0;
-        unsigned int replacementLength = 0;
-        unsigned int cursorIndex = 0;
+        std::optional<unsigned int> replacementIndex;
+        std::optional<unsigned int> replacementLength;
+        std::optional<unsigned int> cursorIndex;
+        bool succeeded = true;
 
-        bool succeeded = (parts.size() >= 2) &&
-                         (Utils::StringToUint(til::at(parts, 1), replacementIndex));
-        succeeded &= (parts.size() >= 3) &&
-                     (Utils::StringToUint(til::at(parts, 2), replacementLength));
-        succeeded &= (parts.size() >= 4) &&
-                     (Utils::StringToUint(til::at(parts, 3), cursorIndex));
+        if (parts.size() >= 2)
+        {
+            replacementIndex = til::parse_unsigned<unsigned int>(til::at(parts, 1));
+            succeeded &= replacementIndex.has_value();
+        }
+        if (parts.size() >= 3)
+        {
+            replacementLength = til::parse_unsigned<unsigned int>(til::at(parts, 2));
+            succeeded &= replacementLength.has_value();
+        }
+        if (parts.size() >= 4)
+        {
+            cursorIndex = til::parse_unsigned<unsigned int>(til::at(parts, 3));
+            succeeded &= cursorIndex.has_value();
+        }
 
         // VsCode is using cursorIndex and replacementIndex, but we aren't currently.
         if (succeeded)
@@ -3881,7 +3895,7 @@ bool AdaptDispatch::DoVsCodeAction(const std::wstring_view string)
             const auto remainder = string.substr(prefixLength);
 
             _api.InvokeCompletions(parts.size() < 5 ? L"" : remainder,
-                                   replacementLength);
+                                   replacementLength.value_or(0));
         }
 
         // If it's poorly formatted, just eat it

@@ -956,12 +956,11 @@ bool OutputStateMachineEngine::_GetOscSetColorTable(const std::wstring_view stri
 
     for (size_t i = 0, j = 1; j < parts.size(); i += 2, j += 2)
     {
-        unsigned int tableIndex = 0;
-        const auto indexSuccess = Utils::StringToUint(til::at(parts, i), tableIndex);
+        const auto tableIndex = til::parse_unsigned<unsigned int>(til::at(parts, i));
         const auto colorOptional = Utils::ColorFromXTermColor(til::at(parts, j));
-        if (indexSuccess && colorOptional.has_value())
+        if (tableIndex && colorOptional.has_value())
         {
-            newTableIndexes.push_back(tableIndex);
+            newTableIndexes.push_back(*tableIndex);
             newRgbs.push_back(colorOptional.value());
         }
     }
