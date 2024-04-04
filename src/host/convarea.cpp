@@ -115,9 +115,7 @@ void WriteConvRegionToScreen(const SCREEN_INFORMATION& ScreenInfo,
     return S_OK;
 }
 
-[[nodiscard]] HRESULT ImeComposeData(std::wstring_view text,
-                                     std::span<const BYTE> attributes,
-                                     std::span<const WORD> colorArray)
+[[nodiscard]] HRESULT ImeComposeData(std::wstring_view text, std::span<const BYTE> attributes)
 {
     try
     {
@@ -126,22 +124,7 @@ void WriteConvRegionToScreen(const SCREEN_INFORMATION& ScreenInfo,
         auto unlock = wil::scope_exit([&] { gci.UnlockConsole(); });
 
         const auto pIme = &gci.ConsoleIme;
-        pIme->WriteCompMessage(text, attributes, colorArray);
-    }
-    CATCH_RETURN();
-    return S_OK;
-}
-
-[[nodiscard]] HRESULT ImeClearComposeData()
-{
-    try
-    {
-        auto& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-        gci.LockConsole();
-        auto unlock = wil::scope_exit([&] { gci.UnlockConsole(); });
-
-        const auto pIme = &gci.ConsoleIme;
-        pIme->ClearAllAreas();
+        pIme->WriteCompMessage(text, attributes);
     }
     CATCH_RETURN();
     return S_OK;

@@ -21,9 +21,12 @@ Notes:
 
 #pragma once
 
+class CCompCursorPos;
+class CicCategoryMgr;
+class CicDisplayAttributeMgr;
 class CConversionArea;
 
-class CConsoleTSF final :
+class CConsoleTSF :
     public ITfContextOwner,
     public ITfContextOwnerCompositionSink,
     public ITfInputProcessorProfileActivationSink,
@@ -32,139 +35,50 @@ class CConsoleTSF final :
     public ITfTextEditSink
 {
 public:
-    CConsoleTSF(HWND hwndConsole,
-                GetSuggestionWindowPos pfnPosition,
-                GetTextBoxAreaPos pfnTextArea) :
-        _hwndConsole(hwndConsole),
-        _pfnPosition(pfnPosition),
-        _pfnTextArea(pfnTextArea),
-        _cRef(1),
-        _tid()
-    {
-    }
+    CConsoleTSF(HWND hwndConsole, GetSuggestionWindowPos pfnPosition, GetTextBoxAreaPos pfnTextArea);
+    virtual ~CConsoleTSF();
 
-    virtual ~CConsoleTSF() = default;
-    [[nodiscard]] HRESULT Initialize();
-    void Uninitialize();
-
-public:
     // IUnknown methods
-    STDMETHODIMP QueryInterface(REFIID riid, void** ppvObj);
-    STDMETHODIMP_(ULONG)
-    AddRef(void);
-    STDMETHODIMP_(ULONG)
-    Release(void);
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppvObj) noexcept override;
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override;
+    ULONG STDMETHODCALLTYPE Release() noexcept override;
 
     // ITfContextOwner
-    STDMETHODIMP GetACPFromPoint(const POINT*, DWORD, LONG* pCP)
-    {
-        if (pCP)
-        {
-            *pCP = 0;
-        }
-
-        return S_OK;
-    }
-
-    // This returns Rectangle of the text box of whole console.
-    // When a user taps inside the rectangle while hardware keyboard is not available,
-    // touch keyboard is invoked.
-    STDMETHODIMP GetScreenExt(RECT* pRect)
-    {
-        if (pRect)
-        {
-            *pRect = _pfnTextArea();
-        }
-
-        return S_OK;
-    }
-
-    // This returns rectangle of current command line edit area.
-    // When a user types in East Asian language, candidate window is shown at this position.
-    // Emoji and more panel (Win+.) is shown at the position, too.
-    STDMETHODIMP GetTextExt(LONG, LONG, RECT* pRect, BOOL* pbClipped)
-    {
-        if (pRect)
-        {
-            *pRect = _pfnPosition();
-        }
-
-        if (pbClipped)
-        {
-            *pbClipped = FALSE;
-        }
-
-        return S_OK;
-    }
-
-    STDMETHODIMP GetStatus(TF_STATUS* pTfStatus)
-    {
-        if (pTfStatus)
-        {
-            pTfStatus->dwDynamicFlags = 0;
-            pTfStatus->dwStaticFlags = TF_SS_TRANSITORY;
-        }
-        return pTfStatus ? S_OK : E_INVALIDARG;
-    }
-    STDMETHODIMP GetWnd(HWND* phwnd)
-    {
-        *phwnd = _hwndConsole;
-        return S_OK;
-    }
-    STDMETHODIMP GetAttribute(REFGUID, VARIANT*)
-    {
-        return E_NOTIMPL;
-    }
+    STDMETHODIMP GetACPFromPoint(const POINT*, DWORD, LONG* pCP) noexcept override;
+    STDMETHODIMP GetScreenExt(RECT* pRect) noexcept override;
+    STDMETHODIMP GetTextExt(LONG, LONG, RECT* pRect, BOOL* pbClipped) noexcept override;
+    STDMETHODIMP GetStatus(TF_STATUS* pTfStatus) noexcept override;
+    STDMETHODIMP GetWnd(HWND* phwnd) noexcept override;
+    STDMETHODIMP GetAttribute(REFGUID, VARIANT*) noexcept override;
 
     // ITfContextOwnerCompositionSink methods
-    STDMETHODIMP OnStartComposition(ITfCompositionView* pComposition, BOOL* pfOk);
-    STDMETHODIMP OnUpdateComposition(ITfCompositionView* pComposition, ITfRange* pRangeNew);
-    STDMETHODIMP OnEndComposition(ITfCompositionView* pComposition);
+    STDMETHODIMP OnStartComposition(ITfCompositionView* pComposition, BOOL* pfOk) noexcept override;
+    STDMETHODIMP OnUpdateComposition(ITfCompositionView* pComposition, ITfRange* pRangeNew) noexcept override;
+    STDMETHODIMP OnEndComposition(ITfCompositionView* pComposition) noexcept override;
 
     // ITfInputProcessorProfileActivationSink
-    STDMETHODIMP OnActivated(DWORD dwProfileType, LANGID langid, REFCLSID clsid, REFGUID catid, REFGUID guidProfile, HKL hkl, DWORD dwFlags);
+    STDMETHODIMP OnActivated(DWORD dwProfileType, LANGID langid, REFCLSID clsid, REFGUID catid, REFGUID guidProfile, HKL hkl, DWORD dwFlags) noexcept override;
 
     // ITfUIElementSink methods
-    STDMETHODIMP BeginUIElement(DWORD dwUIElementId, BOOL* pbShow);
-    STDMETHODIMP UpdateUIElement(DWORD dwUIElementId);
-    STDMETHODIMP EndUIElement(DWORD dwUIElementId);
+    STDMETHODIMP BeginUIElement(DWORD dwUIElementId, BOOL* pbShow) noexcept override;
+    STDMETHODIMP UpdateUIElement(DWORD dwUIElementId) noexcept override;
+    STDMETHODIMP EndUIElement(DWORD dwUIElementId) noexcept override;
 
     // ITfCleanupContextSink methods
-    STDMETHODIMP OnCleanupContext(TfEditCookie ecWrite, ITfContext* pic);
+    STDMETHODIMP OnCleanupContext(TfEditCookie ecWrite, ITfContext* pic) noexcept override;
 
     // ITfTextEditSink methods
-    STDMETHODIMP OnEndEdit(ITfContext* pInputContext, TfEditCookie ecReadOnly, ITfEditRecord* pEditRecord);
+    STDMETHODIMP OnEndEdit(ITfContext* pInputContext, TfEditCookie ecReadOnly, ITfEditRecord* pEditRecord) noexcept override;
 
-public:
-    CConversionArea* CreateConversionArea();
-    CConversionArea* GetConversionArea() { return _pConversionArea; }
-    ITfContext* GetInputContext() { return _spITfInputContext.get(); }
-    HWND GetConsoleHwnd() { return _hwndConsole; }
-    TfClientId GetTfClientId() { return _tid; }
-    BOOL IsInComposition() { return (_cCompositions > 0); }
-    void OnEditSession() { _fEditSessionRequested = FALSE; }
-    BOOL IsPendingCompositionCleanup() { return _fCleanupSessionRequested || _fCompositionCleanupSkipped; }
-    void OnCompositionCleanup(BOOL bSucceeded)
-    {
-        _fCleanupSessionRequested = FALSE;
-        _fCompositionCleanupSkipped = !bSucceeded;
-    }
-    void SetModifyingDocFlag(BOOL fSet) { _fModifyingDoc = fSet; }
-    void SetFocus(BOOL fSet)
-    {
-        if (!fSet && _cCompositions)
-        {
-            // Close (terminate) any open compositions when losing the input focus.
-            if (_spITfInputContext)
-            {
-                auto spCompositionServices = _spITfInputContext.try_query<ITfContextOwnerCompositionServices>();
-                if (spCompositionServices)
-                {
-                    spCompositionServices->TerminateComposition(nullptr);
-                }
-            }
-        }
-    }
+    CConversionArea* GetConversionArea() const;
+    ITfContext* GetInputContext() const;
+    HWND GetConsoleHwnd() const;
+    TfClientId GetTfClientId() const;
+    bool IsInComposition() const;
+    bool IsPendingCompositionCleanup() const;
+    void OnCompositionCleanup(bool bSucceeded);
+    void SetModifyingDocFlag(bool fSet);
+    void SetFocus(bool fSet) const;
 
     // A workaround for a MS Korean IME scenario where the IME appends a whitespace
     // composition programmatically right after completing a keyboard input composition.
@@ -178,19 +92,65 @@ public:
     void SetCompletedRangeLength(long cch) { _cchCompleted = cch; }
 
 private:
-    [[nodiscard]] HRESULT _OnUpdateComposition();
-    [[nodiscard]] HRESULT _OnCompleteComposition();
-    BOOL _HasCompositionChanged(ITfContext* pInputContext, TfEditCookie ecReadOnly, ITfEditRecord* pEditRecord);
+    struct CEditSessionObjectBase : ITfEditSession
+    {
+        virtual ~CEditSessionObjectBase() = default;
 
-private:
-    // ref count.
-    DWORD _cRef;
+        explicit CEditSessionObjectBase(CConsoleTSF* tsf) noexcept;
+
+        // IUnknown methods
+        STDMETHODIMP QueryInterface(REFIID riid, void** ppvObj) noexcept override;
+        ULONG STDMETHODCALLTYPE AddRef() noexcept override;
+        ULONG STDMETHODCALLTYPE Release() noexcept override;
+
+        CConsoleTSF* tsf = nullptr;
+        ULONG referenceCount = 0;
+    };
+
+    template<HRESULT (CConsoleTSF::*Callback)(TfEditCookie)>
+    struct CEditSessionObject : CEditSessionObjectBase
+    {
+        using CEditSessionObjectBase::CEditSessionObjectBase;
+
+        // ITfEditSession method
+        STDMETHODIMP DoEditSession(TfEditCookie ec) noexcept override
+        {
+            return (tsf->*Callback)(ec);
+        }
+    };
+    
+    [[nodiscard]] HRESULT CompComplete(TfEditCookie ec);
+    [[nodiscard]] HRESULT EmptyCompositionRange(TfEditCookie ec);
+    [[nodiscard]] HRESULT UpdateCompositionString(TfEditCookie ec);
+
+    void _cleanup() const noexcept;
+    [[nodiscard]] HRESULT _requestCompositionComplete();
+    [[nodiscard]] HRESULT _requestCompositionCleanup();
+    static bool _HasCompositionChanged(ITfContext* context, TfEditCookie ec, ITfEditRecord* editRecord);
+
+    static [[nodiscard]] HRESULT _GetAllTextRange(TfEditCookie ec, ITfContext* ic, ITfRange** range, LONG* lpTextLength, TF_HALTCOND* lpHaltCond);
+    [[nodiscard]] HRESULT _ClearTextInRange(TfEditCookie ec, ITfRange* range);
+    [[nodiscard]] HRESULT _GetTextAndAttribute(TfEditCookie ec, ITfRange* range, std::wstring& CompStr, std::vector<TfGuidAtom> CompGuid, BOOL bInWriteSession, CicCategoryMgr* pCicCatMgr, CicDisplayAttributeMgr* pCicDispAttr);
+    [[nodiscard]] HRESULT _GetTextAndAttribute(TfEditCookie ec, ITfRange* range, std::wstring& CompStr, std::vector<TfGuidAtom>& CompGuid, std::wstring& ResultStr, BOOL bInWriteSession, CicCategoryMgr* pCicCatMgr, CicDisplayAttributeMgr* pCicDispAttr);
+    [[nodiscard]] HRESULT _GetTextAndAttributeGapRange(TfEditCookie ec, ITfRange* gap_range, LONG result_comp, std::wstring& CompStr, std::vector<TfGuidAtom>& CompGuid, std::wstring& ResultStr);
+    [[nodiscard]] HRESULT _GetTextAndAttributePropertyRange(TfEditCookie ec, ITfRange* pPropRange, BOOL fDispAttribute, LONG result_comp, BOOL bInWriteSession, TF_DISPLAYATTRIBUTE da, TfGuidAtom guidatom, std::wstring& CompStr, std::vector<TfGuidAtom>& CompGuid, std::wstring& ResultStr);
+    [[nodiscard]] HRESULT _GetNoDisplayAttributeRange(TfEditCookie ec, ITfRange* range, const GUID** guids, int guid_size, ITfRange* no_display_attribute_range);
+    [[nodiscard]] HRESULT _GetCursorPosition(TfEditCookie ec, CCompCursorPos& CompCursorPos);
+    [[nodiscard]] HRESULT _IsInterimSelection(TfEditCookie ec, ITfRange** pInterimRange, BOOL* pfInterim);
+    [[nodiscard]] HRESULT _MakeCompositionString(TfEditCookie ec, ITfRange* FullTextRange, BOOL bInWriteSession, CicCategoryMgr* pCicCatMgr, CicDisplayAttributeMgr* pCicDispAttr);
+    [[nodiscard]] HRESULT _MakeInterimString(TfEditCookie ec, ITfRange* FullTextRange, ITfRange* InterimRange, LONG lTextLength, BOOL bInWriteSession, CicCategoryMgr* pCicCatMgr, CicDisplayAttributeMgr* pCicDispAttr);
+    [[nodiscard]] HRESULT _CreateCategoryAndDisplayAttributeManager(CicCategoryMgr** pCicCatMgr, CicDisplayAttributeMgr** pCicDispAttr);
+
+    ULONG _referenceCount = 1;
 
     // Cicero stuff.
-    TfClientId _tid;
-    wil::com_ptr_nothrow<ITfThreadMgrEx> _spITfThreadMgr;
-    wil::com_ptr_nothrow<ITfDocumentMgr> _spITfDocumentMgr;
-    wil::com_ptr_nothrow<ITfContext> _spITfInputContext;
+    TfClientId _tid = 0;
+    wil::com_ptr<ITfThreadMgrEx> _threadMgrEx;
+    wil::com_ptr<ITfDocumentMgr> _documentMgr;
+    wil::com_ptr<ITfContext> _context;
+    wil::com_ptr<ITfSource> _threadMgrExSource;
+    wil::com_ptr<ITfSource> _contextSource;
+    wil::com_ptr<ITfSourceSingle> _contextSourceSingle;
 
     // Event sink cookies.
     DWORD _dwContextOwnerCookie = 0;
@@ -199,22 +159,21 @@ private:
     DWORD _dwActivationSinkCookie = 0;
 
     // Conversion area object for the languages.
-    CConversionArea* _pConversionArea = nullptr;
+    std::unique_ptr<CConversionArea> _pConversionArea;
 
     // Console info.
-    HWND _hwndConsole;
-    GetSuggestionWindowPos _pfnPosition;
-    GetTextBoxAreaPos _pfnTextArea;
+    HWND _hwndConsole = nullptr;
+    GetSuggestionWindowPos _pfnPosition = nullptr;
+    GetTextBoxAreaPos _pfnTextArea = nullptr;
+
+    CEditSessionObject<&CConsoleTSF::CompComplete> _editSessionCompositionComplete{ this };
+    CEditSessionObject<&CConsoleTSF::EmptyCompositionRange> _editSessionCompositionCleanup{ this };
+    CEditSessionObject<&CConsoleTSF::UpdateCompositionString> _editSessionUpdateCompositionString{ this };
 
     // Miscellaneous flags
-    BOOL _fModifyingDoc = FALSE; // Set TRUE, when calls ITfRange::SetText
-    BOOL _fCoInitialized = FALSE;
-    BOOL _fEditSessionRequested = FALSE;
-    BOOL _fCleanupSessionRequested = FALSE;
-    BOOL _fCompositionCleanupSkipped = FALSE;
+    bool _fModifyingDoc = false; // Set true, when calls ITfRange::SetText
+    bool _fCompositionCleanupSkipped = false;
 
     int _cCompositions = 0;
     long _cchCompleted = 0; // length of completed composition waiting for cleanup
 };
-
-extern CConsoleTSF* g_pConsoleTSF;

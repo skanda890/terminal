@@ -22,178 +22,115 @@ Notes:
 #include "precomp.h"
 #include "TfDispAttr.h"
 
-//+---------------------------------------------------------------------------
-//
-// CicDisplayAttributeMgr::ctor
-// CicDisplayAttributeMgr::dtor
-//
-//----------------------------------------------------------------------------
-
-CicDisplayAttributeMgr::CicDisplayAttributeMgr() = default;
-
-CicDisplayAttributeMgr::~CicDisplayAttributeMgr() = default;
-
-//+---------------------------------------------------------------------------
-//
-// CicDisplayAttributeMgr::GetDisplayAttributeTrackPropertyRange
-//
-//----------------------------------------------------------------------------
-
-[[nodiscard]] HRESULT CicDisplayAttributeMgr::GetDisplayAttributeTrackPropertyRange(TfEditCookie ec,
-                                                                                    ITfContext* pic,
-                                                                                    ITfRange* pRange,
-                                                                                    ITfReadOnlyProperty** ppProp,
-                                                                                    IEnumTfRanges** ppEnum,
-                                                                                    ULONG* pulNumProp)
+[[nodiscard]] HRESULT CicDisplayAttributeMgr::GetDisplayAttributeTrackPropertyRange(TfEditCookie ec, ITfContext* pic, ITfRange* pRange, ITfReadOnlyProperty** ppProp, IEnumTfRanges** ppEnum, ULONG* pulNumProp)
 {
-    auto hr = E_FAIL;
-    try
+    const auto ulNumProp = static_cast<ULONG>(m_DispAttrProp.size());
+    if (ulNumProp == 0)
     {
-        auto ulNumProp = static_cast<ULONG>(m_DispAttrProp.size());
-        if (ulNumProp)
-        {
-            // TrackProperties wants an array of GUID *'s
-            auto ppguidProp = std::make_unique<const GUID*[]>(ulNumProp);
-            for (ULONG i = 0; i < ulNumProp; i++)
-            {
-                ppguidProp[i] = &m_DispAttrProp.at(i);
-            }
-
-            wil::com_ptr<ITfReadOnlyProperty> pProp;
-            if (SUCCEEDED(hr = pic->TrackProperties(ppguidProp.get(), ulNumProp, nullptr, NULL, &pProp)))
-            {
-                hr = pProp->EnumRanges(ec, ppEnum, pRange);
-                if (SUCCEEDED(hr))
-                {
-                    *ppProp = pProp.detach();
-                }
-            }
-
-            if (SUCCEEDED(hr))
-            {
-                *pulNumProp = ulNumProp;
-            }
-        }
+        return S_OK;
     }
-    CATCH_RETURN();
-    return hr;
+
+    // TrackProperties wants an array of GUID *'s
+    const auto ppguidProp = std::make_unique<const GUID*[]>(ulNumProp);
+    for (size_t i = 0; i < ulNumProp; i++)
+    {
+        ppguidProp[i] = &m_DispAttrProp[i];
+    }
+
+    wil::com_ptr<ITfReadOnlyProperty> pProp;
+    THROW_IF_FAILED(pic->TrackProperties(ppguidProp.get(), ulNumProp, nullptr, 0, pProp.addressof()));
+    THROW_IF_FAILED(pProp->EnumRanges(ec, ppEnum, pRange));
+
+    *ppProp = pProp.detach();
+    *pulNumProp = ulNumProp;
+    return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// CicDisplayAttributeMgr::GetDisplayAttributeData
-//
-//----------------------------------------------------------------------------
-
-[[nodiscard]] HRESULT CicDisplayAttributeMgr::GetDisplayAttributeData(ITfCategoryMgr* pcat,
-                                                                      TfEditCookie ec,
-                                                                      ITfReadOnlyProperty* pProp,
-                                                                      ITfRange* pRange,
-                                                                      TF_DISPLAYATTRIBUTE* pda,
-                                                                      TfGuidAtom* pguid,
-                                                                      ULONG /*ulNumProp*/)
+[[nodiscard]] HRESULT CicDisplayAttributeMgr::GetDisplayAttributeData(ITfCategoryMgr* pcat, TfEditCookie ec, ITfReadOnlyProperty* pProp, ITfRange* pRange, TF_DISPLAYATTRIBUTE* pda, TfGuidAtom* pguid, ULONG /*ulNumProp*/)
 {
-    VARIANT var;
-
-    auto hr = E_FAIL;
-
-    if (SUCCEEDED(pProp->GetValue(ec, pRange, &var)))
+    wil::unique_variant var;
+    if (FAILED(pProp->GetValue(ec, pRange, &var)) || var.vt != VT_UNKNOWN)
     {
-        FAIL_FAST_IF(!(var.vt == VT_UNKNOWN));
-
-        wil::com_ptr_nothrow<IEnumTfPropertyValue> pEnumPropertyVal;
-        if (wil::try_com_query_to(var.punkVal, &pEnumPropertyVal))
-        {
-            TF_PROPERTYVAL tfPropVal;
-            while (pEnumPropertyVal->Next(1, &tfPropVal, nullptr) == S_OK)
-            {
-                if (tfPropVal.varValue.vt == VT_EMPTY)
-                {
-                    continue; // prop has no value over this span
-                }
-
-                FAIL_FAST_IF(!(tfPropVal.varValue.vt == VT_I4)); // expecting GUIDATOMs
-
-                auto gaVal = (TfGuidAtom)tfPropVal.varValue.lVal;
-
-                GUID guid;
-                pcat->GetGUID(gaVal, &guid);
-
-                wil::com_ptr_nothrow<ITfDisplayAttributeInfo> pDAI;
-                if (SUCCEEDED(m_pDAM->GetDisplayAttributeInfo(guid, &pDAI, NULL)))
-                {
-                    //
-                    // Issue: for simple apps.
-                    //
-                    // Small apps can not show multi underline. So
-                    // this helper function returns only one
-                    // DISPLAYATTRIBUTE structure.
-                    //
-                    if (pda)
-                    {
-                        pDAI->GetAttributeInfo(pda);
-                    }
-
-                    if (pguid)
-                    {
-                        *pguid = gaVal;
-                    }
-
-                    hr = S_OK;
-                    break;
-                }
-            }
-        }
-        VariantClear(&var);
+        return S_OK;
     }
-    return hr;
-}
 
-//+---------------------------------------------------------------------------
-//
-// CicDisplayAttributeMgr::InitCategoryInstance
-//
-//----------------------------------------------------------------------------
+    wil::com_ptr_nothrow<IEnumTfPropertyValue> pEnumPropertyVal;
+    if (!wil::try_com_query_to(var.punkVal, pEnumPropertyVal.addressof()))
+    {
+        return S_OK;
+    }
+
+    TF_PROPERTYVAL tfPropVal;
+    while (pEnumPropertyVal->Next(1, &tfPropVal, nullptr) == S_OK)
+    {
+        if (tfPropVal.varValue.vt != VT_I4) // expecting TfGuidAtom
+        {
+            continue;
+        }
+
+        const auto gaVal = static_cast<TfGuidAtom>(tfPropVal.varValue.lVal);
+
+        GUID guid;
+        wil::com_ptr_nothrow<ITfDisplayAttributeInfo> pDAI;
+        if (SUCCEEDED(pcat->GetGUID(gaVal, &guid)) &&
+            SUCCEEDED(m_pDAM->GetDisplayAttributeInfo(guid, pDAI.addressof(), nullptr)))
+        {
+            //
+            // Issue: for simple apps.
+            //
+            // Small apps can not show multi underline. So
+            // this helper function returns only one
+            // DISPLAYATTRIBUTE structure.
+            //
+            if (pda)
+            {
+                pDAI->GetAttributeInfo(pda);
+            }
+
+            if (pguid)
+            {
+                *pguid = gaVal;
+            }
+
+            break;
+        }
+    }
+
+    return S_OK;
+}
 
 [[nodiscard]] HRESULT CicDisplayAttributeMgr::InitDisplayAttributeInstance(ITfCategoryMgr* pcat)
 {
-    HRESULT hr;
-
-    //
-    // Create ITfDisplayAttributeMgr instance.
-    //
-    if (FAILED(hr = ::CoCreateInstance(CLSID_TF_DisplayAttributeMgr, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&m_pDAM))))
-    {
-        return hr;
-    }
+    m_pDAM = wil::CoCreateInstance<ITfDisplayAttributeMgr>(CLSID_TF_DisplayAttributeMgr);
 
     wil::com_ptr_nothrow<IEnumGUID> pEnumProp;
-    pcat->EnumItemsInCategory(GUID_TFCAT_DISPLAYATTRIBUTEPROPERTY, &pEnumProp);
+    std::ignore = pcat->EnumItemsInCategory(GUID_TFCAT_DISPLAYATTRIBUTEPROPERTY, pEnumProp.addressof());
 
     //
     // make a database for Display Attribute Properties.
     //
     if (pEnumProp)
     {
+        //
+        // add System Display Attribute first.
+        // so no other Display Attribute property overwrite it.
+        //
+        m_DispAttrProp.emplace_back(GUID_PROP_ATTRIBUTE);
+
         GUID guidProp;
-
-        try
+        while (pEnumProp->Next(1, &guidProp, nullptr) == S_OK)
         {
-            //
-            // add System Display Attribute first.
-            // so no other Display Attribute property overwrite it.
-            //
-            m_DispAttrProp.emplace_back(GUID_PROP_ATTRIBUTE);
-
-            while (pEnumProp->Next(1, &guidProp, nullptr) == S_OK)
+            if (!IsEqualGUID(guidProp, GUID_PROP_ATTRIBUTE))
             {
-                if (!IsEqualGUID(guidProp, GUID_PROP_ATTRIBUTE))
-                {
-                    m_DispAttrProp.emplace_back(guidProp);
-                }
+                m_DispAttrProp.emplace_back(guidProp);
             }
         }
-        CATCH_RETURN();
     }
-    return hr;
+
+    return S_OK;
+}
+
+ITfDisplayAttributeMgr* CicDisplayAttributeMgr::GetDisplayAttributeMgr()
+{
+    return m_pDAM.get();
 }
